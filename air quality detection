@@ -1,0 +1,187 @@
+#include <ESP32Servo.h>
+#include <NewPing.h>
+#include <DHT.h>
+#include <WiFi.h>
+#include <Firebase_ESP_Client.h>
+#define WIFI_SSID "Aerosentry"
+#define WIFI_PASSWORD "12345678910"
+#define API_KEY "AIzaSyBoenuX0Gghok0dKbgkkNhhnUPfDBwdnd8"
+#define DATABASE_URL "aerosentry-d77d0-default-rtdb.firebaseio.com"
+#define USER_EMAIL "aerosentry666@gmail.com"
+#define USER_PASSWORD "aerosentry1234"
+int Rsensor = 18;
+int Lsensor = 5;
+// Define pin numbers
+#define trigPin 22
+#define echoPin 23
+#define RMP 14 // Right motor positive (RMP)
+36
+#define RMN 12 // Right motor negative (RMN)
+#define LMP 27 // Left motor positive (LMP)
+#define LMN 26 // Left motor negative (LMN)
+#define ENA 25 // Enable pin for motor A (Right motor)
+#define ENB 33 // Enable pin for motor B (Left motor)
+#define DHTPIN 4 // DHT11 data pin
+#define MQ9PIN 34 // MQ-9 analog pin
+#define MQ2PIN 35 // MQ-2 analog pin
+#define MQ135PIN 36 // MQ-135 analog pin
+#define led 2
+#define alert 33
+// Define servo and motor objects
+DHT dht(DHTPIN, DHT22);
+NewPing sonar(trigPin, echoPin, 200); // NewPing object with maximum distance of 200 cm
+unsigned long previousMillis = 0;
+const long interval = 20000; // Interval of 20 seconds
+int distance;
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+37
+void setup() {
+// Initialize Serial Monitor
+Serial.begin(115200);
+connectWiFi();
+stopRobot();
+initFirebase();
+dht.begin();
+pinMode(RMP, OUTPUT);
+pinMode(RMN, OUTPUT);
+pinMode(LMP, OUTPUT);
+pinMode(LMN, OUTPUT);
+pinMode(ENA, OUTPUT); // Enable pin for motor A
+pinMode(ENB, OUTPUT); // Enable pin for motor B
+pinMode(led, OUTPUT);
+pinMode(alert, OUTPUT);
+pinMode(MQ9PIN, INPUT);
+pinMode(MQ2PIN, INPUT);
+pinMode(MQ135PIN, INPUT);
+pinMode(Rsensor, INPUT);
+pinMode(Lsensor, INPUT);
+digitalWrite(ENA, HIGH); // Enable motor A
+38
+digitalWrite(ENB, HIGH); // Enable motor B
+delay(2000);
+}
+void loop() {
+int Lreadvalue = digitalRead(Lsensor);
+int Rreadvalue = digitalRead(Rsensor);
+distance = sonar.ping_cm();
+Serial.print("Distance: ");
+Serial.println(distance);
+if (distance < 20) {
+stopRobot();
+} else {
+if (Rreadvalue == 0 && Lreadvalue == 0) {
+moveForward();
+Serial.println("FORWARD");
+} else if (Rreadvalue == 1 && Lreadvalue == 0) {
+turnRight();
+Serial.println("RIGHT TURN");
+} else if (Lreadvalue == 1 && Rreadvalue == 0) {
+turnLeft();
+39
+Serial.println("LEFT TURN");
+} else if (Rreadvalue == 1 && Lreadvalue == 1) {
+stopRobot();
+Serial.println("STOP");
+}
+}
+unsigned long currentMillis = millis();
+if (currentMillis - previousMillis >= interval) {
+previousMillis = currentMillis;
+readAndPrintSensorData();
+}
+delay(100);
+}
+void moveForward() {
+digitalWrite(RMP, HIGH);
+digitalWrite(RMN, LOW);
+digitalWrite(LMP, HIGH);
+digitalWrite(LMN, LOW);
+}
+void stopRobot() {
+40
+digitalWrite(RMP, LOW);
+digitalWrite(RMN, LOW);
+digitalWrite(LMP, LOW);
+digitalWrite(LMN, LOW);
+}
+void turnRight() {
+digitalWrite(RMP, LOW);
+digitalWrite(RMN, HIGH);
+digitalWrite(LMP, HIGH);
+digitalWrite(LMN, LOW);
+analogWrite(ENA, 100); // Adjust speed for right turn
+analogWrite(ENB, 255); // Full speed for left motor
+}
+void turnLeft() {
+digitalWrite(RMP, HIGH);
+digitalWrite(RMN, LOW);
+digitalWrite(LMP, LOW);
+digitalWrite(LMN, HIGH);
+analogWrite(ENA, 255); // Full speed for right motor
+analogWrite(ENB, 100); // Adjust speed for left turn
+}
+41
+void readAndPrintSensorData() {
+stopRobot();
+delay(1000);
+float temperature = dht.readTemperature();
+float humidity = dht.readHumidity();
+int mq9Value = analogRead(MQ9PIN);
+int mq2Value = analogRead(MQ2PIN);
+int mq135Value = analogRead(MQ135PIN);
+String Stemp = String(temperature) + "°C";
+String Shumi = String(humidity) + "%";
+Serial.println("Sensor Data:");
+Serial.print("Temperature: ");
+Serial.println(Stemp);
+Serial.print("Humidity: ");
+Serial.println(Shumi);
+Serial.print("MQ-9 Value: ");
+Serial.println(mq9Value);
+Serial.print("MQ-2 Value: ");
+Serial.println(mq2Value);
+42
+Serial.print("MQ-135 Value: ");
+Serial.println(mq135Value);
+if (mq9Value > 10 || mq2Value > 1000 || mq135Value > 1000) {
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/Status", "WARNING THRESHOLD MET !");
+digitalWrite(alert, HIGH);
+} else {
+digitalWrite(alert, LOW);
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/Status", "Normal");
+}
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/Temperature", Stemp);
+delay(100);
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/Humidity", Shumi);
+delay(100);
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/MQ-2", mq2Value);
+delay(100);
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/MQ-9", mq9Value);
+delay(100);
+Firebase.RTDB.setString(&fbdo, "/Aerosentry/MQ-135", mq135Value);
+delay(100);
+Serial.println("Done uploading");
+}
+43
+void connectWiFi() {
+Serial.print("Connecting to Wi-Fi");
+WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+while (WiFi.status() != WL_CONNECTED) {
+Serial.print(".");
+digitalWrite(led, HIGH);
+delay(250);
+digitalWrite(led, LOW);
+delay(250);
+}
+Serial.println("\nConnected to Wi-Fi");
+digitalWrite(led, HIGH);
+}
+void initFirebase() {
+config.api_key = API_KEY;
+auth.user.email = USER_EMAIL;
+auth.user.password = USER_PASSWORD;
+config.database_url = DATABASE_URL;
+Firebase.begin(&config, &auth);
+}
